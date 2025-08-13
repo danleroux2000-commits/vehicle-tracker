@@ -1,0 +1,119 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Vehicle Tracker</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+        }
+
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 8px;
+            border-radius: 4px;
+            box-shadow: 0 0 5px rgba(0,0,0,0.3);
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label for="vehicleSelect">Vehicle: </label>
+        <select id="vehicleSelect"><option value="all">All Vehicles</option></select>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        // 1. Firebase Setup
+        firebase.initializeApp({ databaseURL: "https://iplant-poc-default-rtdb.firebaseio.com/" });
+        const db = firebase.database();
+
+        // 2. Leaflet Map Setup
+        const map = L.map('map').setView([-33.9, 18.4], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Containers
+        const markers = {};
+        const polylines = {};
+        const vehicleSelect = document.getElementById('vehicleSelect');
+        let firstRender = true;
+
+        const updateMap = (data) => {
+            // Clear old markers & polylines
+            Object.values(markers).forEach(m => map.removeLayer(m));
+            Object.values(polylines).forEach(p => map.removeLayer(p));
+            markers.clear;
+            polylines.clear;
+
+            vehicleSelect.innerHTML = '<option value="all">All Vehicles</option>';
+            let boundsArr = [];
+
+            for (let vid in data) {
+                vehicleSelect.insertAdjacentHTML('beforeend',
+                    `<option value="${vid}">${vid}</option>`);
+
+                const points = Object.values(data[vid]).map(p => [p.lat, p.lon]);
+                if (!points.length) continue;
+                const latest = points[points.length - 1];
+                const latestObj = data[vid][Object.keys(data[vid]).pop()];
+
+                if (vehicleSelect.value !== 'all' && vehicleSelect.value !== vid) continue;
+
+                // Add marker
+                const marker = L.marker(latest).addTo(map)
+                    .bindPopup(`<b>${vid}</b><br>Status: ${latestObj.status}<br>Time: ${latestObj.timestamp}`)
+                    .bindTooltip(vid, { permanent: true, direction: 'right' }); // Label always visible
+ markers[vid] = marker;
+                boundsArr.push(latest);
+
+                // Add path
+                const path = L.polyline(points, { color: 'blue' }).addTo(map);
+                polylines[vid] = path;
+            }
+
+            // Fit bounds if we have data
+            if (boundsArr.length > 0) {
+                const bounds = L.latLngBounds(boundsArr);
+                map.whenReady(() => map.fitBounds(bounds, { padding: [20, 20] }));
+            }
+        };
+
+        // 3. Data Listener
+        db.ref('vehicles').on('value', snapshot => {
+            const data = snapshot.val();
+            if (!data) return;
+            updateMap(data);
+        });
+
+        // 4. Filter handler
+        vehicleSelect.addEventListener('change', () =>
+            db.ref('vehicles').once('value').then(snap => updateMap(snap.val()))
+        );
+    </script>
+</body>
+</html>
