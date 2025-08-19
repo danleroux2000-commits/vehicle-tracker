@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
     <title>Live Vehicle Tracker</title>
@@ -37,6 +37,14 @@
             width: 100%;
             height: 100%;
         }
+
+        /* Circle marker container */
+        .circle-marker div {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
     </style>
 </head>
 <body>
@@ -61,14 +69,31 @@
         const markers = {};
         const polylines = {};
         const vehicleSelect = document.getElementById('vehicleSelect');
-        let firstRender = true;
+
+        // Colors for vehicles
+        const vehicleColors = {};
+        const colorPalette = [
+            "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231",
+            "#911eb4", "#46f0f0", "#f032e6", "#bcf60c", "#fabebe",
+            "#008080", "#e6beff", "#9a6324", "#fffac8", "#800000",
+            "#aaffc3", "#808000", "#ffd8b1", "#000075", "#808080"
+        ];
+        let colorIndex = 0;
+
+        const getVehicleColor = (vid) => {
+            if (!vehicleColors[vid]) {
+                vehicleColors[vid] = colorPalette[colorIndex % colorPalette.length];
+                colorIndex++;
+            }
+            return vehicleColors[vid];
+        };
 
         const updateMap = (data) => {
             // Clear old markers & polylines
             Object.values(markers).forEach(m => map.removeLayer(m));
             Object.values(polylines).forEach(p => map.removeLayer(p));
-            markers.clear;
-            polylines.clear;
+            for (let key in markers) delete markers[key];
+            for (let key in polylines) delete polylines[key];
 
             vehicleSelect.innerHTML = '<option value="all">All Vehicles</option>';
             let boundsArr = [];
@@ -77,22 +102,59 @@
                 vehicleSelect.insertAdjacentHTML('beforeend',
                     `<option value="${vid}">${vid}</option>`);
 
-                const points = Object.values(data[vid]).map(p => [p.lat, p.lon]);
-                if (!points.length) continue;
-                const latest = points[points.length - 1];
-                const latestObj = data[vid][Object.keys(data[vid]).pop()];
+                // Sort all points by timestamp (oldest → newest)
+                const sortedPoints = Object.values(data[vid])
+                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                if (!sortedPoints.length) continue;
 
                 if (vehicleSelect.value !== 'all' && vehicleSelect.value !== vid) continue;
 
-                // Add marker
-                const marker = L.marker(latest).addTo(map)
-                    .bindPopup(`<b>${vid}</b><br>Status: ${latestObj.status}<br>Time: ${latestObj.timestamp}`)
-                    .bindTooltip(vid, { permanent: true, direction: 'right' }); // Label always visible
- markers[vid] = marker;
-                boundsArr.push(latest);
+                const points = sortedPoints.map(p => [p.lat, p.lon]);
+                const vehicleColor = getVehicleColor(vid);
 
-                // Add path
-                const path = L.polyline(points, { color: 'blue' }).addTo(map);
+                // Add a marker for every point
+                sortedPoints.forEach((p, idx) => {
+                    const latlng = [p.lat, p.lon];
+
+                    // Format timestamp nicely
+                    let formattedTime = p.timestamp;
+                    try {
+                        const d = new Date(p.timestamp);
+                        formattedTime = d.toLocaleString("en-GB", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                        });
+                    } catch (e) {
+                        console.warn("Invalid timestamp:", p.timestamp);
+                    }
+
+                    // Choose icon: last = pin, others = colored dot
+                    const markerIcon = (idx === sortedPoints.length - 1)
+                        ? L.icon({
+                            iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+                            iconSize: [25, 41],
+                            iconAnchor: [12, 41],
+                            popupAnchor: [1, -34]
+                        })
+                        : L.divIcon({
+                            className: "circle-marker",
+                            html: `<div style="background:${vehicleColor}"></div>`
+                        });
+
+                    const marker = L.marker(latlng, { icon: markerIcon }).addTo(map)
+                        .bindPopup(`<b>${vid}</b><br>Status: ${p.status}<br>Time: ${formattedTime}`)
+                        .bindTooltip(`${vid}`, { permanent: false, direction: 'top' });
+
+                    markers[`${vid}_${idx}`] = marker;
+                    boundsArr.push(latlng);
+                });
+
+                // Add polyline for the path (chronological) with vehicle's color
+                const path = L.polyline(points, { color: vehicleColor }).addTo(map);
                 polylines[vid] = path;
             }
 
@@ -117,4 +179,3 @@
     </script>
 </body>
 </html>
-
