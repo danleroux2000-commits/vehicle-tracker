@@ -28,9 +28,21 @@
             left: 10px;
             z-index: 1000;
             background: white;
-            padding: 8px;
-            border-radius: 4px;
+            padding: 10px;
+            border-radius: 6px;
             box-shadow: 0 0 5px rgba(0,0,0,0.3);
+            font-family: Arial, sans-serif;
+        }
+
+        #controls label, #controls input, #controls select {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+        }
+
+        #controls input, #controls select {
+            width: 200px;
+            padding: 4px;
         }
 
         #map {
@@ -38,7 +50,6 @@
             height: 100%;
         }
 
-        /* Circle marker container */
         .circle-marker div {
             width: 10px;
             height: 10px;
@@ -49,28 +60,39 @@
 </head>
 <body>
     <div id="controls">
-        <label for="vehicleSelect">Vehicle: </label>
-        <select id="vehicleSelect"><option value="all">All Vehicles</option></select>
+        <label for="vehicleSelect">Vehicle:</label>
+        <select id="vehicleSelect">
+            <option value="all">All Vehicles</option>
+        </select>
+
+        <label for="startDate">Start Date & Time:</label>
+        <input type="datetime-local" id="startDate">
+
+        <label for="endDate">End Date & Time:</label>
+        <input type="datetime-local" id="endDate">
     </div>
+
     <div id="map"></div>
 
     <script>
-        // 1. Firebase Setup
+        // Firebase setup
         firebase.initializeApp({ databaseURL: "https://iplant-poc-default-rtdb.firebaseio.com/" });
         const db = firebase.database();
 
-        // 2. Leaflet Map Setup
+        // Leaflet map setup
         const map = L.map('map').setView([-33.9, 18.4], 10);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        // Containers
+        // DOM Elements
+        const vehicleSelect = document.getElementById('vehicleSelect');
+        const startDateInput = document.getElementById('startDate');
+        const endDateInput = document.getElementById('endDate');
+
+        // State containers
         const markers = {};
         const polylines = {};
-        const vehicleSelect = document.getElementById('vehicleSelect');
-
-        // Colors for vehicles
         const vehicleColors = {};
         const colorPalette = [
             "#e6194b", "#3cb44b", "#ffe119", "#4363d8", "#f58231",
@@ -80,44 +102,58 @@
         ];
         let colorIndex = 0;
 
-        const getVehicleColor = (vid) => {
+        function getVehicleColor(vid) {
             if (!vehicleColors[vid]) {
                 vehicleColors[vid] = colorPalette[colorIndex % colorPalette.length];
                 colorIndex++;
             }
             return vehicleColors[vid];
-        };
+        }
 
-        const updateMap = (data) => {
-            // Clear old markers & polylines
+        function clearMap() {
             Object.values(markers).forEach(m => map.removeLayer(m));
             Object.values(polylines).forEach(p => map.removeLayer(p));
-            for (let key in markers) delete markers[key];
-            for (let key in polylines) delete polylines[key];
+            Object.keys(markers).forEach(k => delete markers[k]);
+            Object.keys(polylines).forEach(k => delete polylines[k]);
+        }
 
+        function updateMap(data, selectedVehicle, startDate, endDate) {
+            clearMap();
+
+            // Rebuild dropdown
             vehicleSelect.innerHTML = '<option value="all">All Vehicles</option>';
-            let boundsArr = [];
+            Object.keys(data).forEach(vid => {
+                const option = document.createElement('option');
+                option.value = vid;
+                option.textContent = vid;
+                if (vid === selectedVehicle) option.selected = true;
+                vehicleSelect.appendChild(option);
+            });
+
+            const boundsArr = [];
 
             for (let vid in data) {
-                vehicleSelect.insertAdjacentHTML('beforeend',
-                    `<option value="${vid}">${vid}</option>`);
+                if (selectedVehicle !== 'all' && vid !== selectedVehicle) continue;
 
-                // Sort all points by timestamp (oldest → newest)
-                const sortedPoints = Object.values(data[vid])
+                let points = Object.values(data[vid])
                     .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
-                if (!sortedPoints.length) continue;
+                // Filter by date
+                if (startDate && endDate) {
+                    points = points.filter(p => {
+                        const ts = new Date(p.timestamp);
+                        return ts >= startDate && ts <= endDate;
+                    });
+                }
 
-                if (vehicleSelect.value !== 'all' && vehicleSelect.value !== vid) continue;
+                if (!points.length) continue;
 
-                const points = sortedPoints.map(p => [p.lat, p.lon]);
+                const latlngs = points.map(p => [p.lat, p.lon]);
                 const vehicleColor = getVehicleColor(vid);
 
-                // Add a marker for every point
-                sortedPoints.forEach((p, idx) => {
+                points.forEach((p, idx) => {
                     const latlng = [p.lat, p.lon];
 
-                    // Format timestamp nicely
                     let formattedTime = p.timestamp;
                     try {
                         const d = new Date(p.timestamp);
@@ -128,12 +164,9 @@
                             hour: "2-digit",
                             minute: "2-digit"
                         });
-                    } catch (e) {
-                        console.warn("Invalid timestamp:", p.timestamp);
-                    }
+                    } catch (e) {}
 
-                    // Choose icon: last = pin, others = colored dot
-                    const markerIcon = (idx === sortedPoints.length - 1)
+                    const markerIcon = (idx === points.length - 1)
                         ? L.icon({
                             iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
                             iconSize: [25, 41],
@@ -146,37 +179,50 @@
                         });
 
                     const marker = L.marker(latlng, { icon: markerIcon }).addTo(map)
-                        .bindPopup(`<b>${vid}</b><br>Status: ${p.status}<br>Time: ${formattedTime}`)
+                        .bindPopup(`
+                            <b>${vid}</b><br>
+                            Status: ${p.status}<br>
+                            Speed: ${p.speed ?? 'N/A'} km/h<br>
+                            Time: ${formattedTime}
+                        `)
                         .bindTooltip(`${vid}`, { permanent: false, direction: 'top' });
 
                     markers[`${vid}_${idx}`] = marker;
                     boundsArr.push(latlng);
                 });
 
-                // Add polyline for the path (chronological) with vehicle's color
-                const path = L.polyline(points, { color: vehicleColor }).addTo(map);
-                polylines[vid] = path;
+                const polyline = L.polyline(latlngs, { color: vehicleColor }).addTo(map);
+                polylines[vid] = polyline;
             }
 
-            // Fit bounds if we have data
-           // if (boundsArr.length > 0) {
-           //     const bounds = L.latLngBounds(boundsArr);
-           //     map.whenReady(() => map.fitBounds(bounds, { padding: [20, 20] }));
-           // }
-        };
+            // Optional: Auto-fit map
+            // if (boundsArr.length > 0) {
+            //     const bounds = L.latLngBounds(boundsArr);
+            //     map.fitBounds(bounds, { padding: [20, 20] });
+            // }
+        }
 
-        // 3. Data Listener
-        db.ref('vehicles').on('value', snapshot => {
-            const data = snapshot.val();
-            if (!data) return;
-            updateMap(data);
+        function applyFilters() {
+            const selected = vehicleSelect.value;
+            const start = startDateInput.value ? new Date(startDateInput.value) : null;
+            const end = endDateInput.value ? new Date(endDateInput.value) : null;
+
+            db.ref('vehicles').once('value').then(snap => {
+                const data = snap.val();
+                if (data) updateMap(data, selected, start, end);
+            });
+        }
+
+        // Initial load
+        db.ref('vehicles').once('value').then(snap => {
+            const data = snap.val();
+            if (data) updateMap(data, 'all', null, null);
         });
 
-        // 4. Filter handler
-        vehicleSelect.addEventListener('change', () =>
-            db.ref('vehicles').once('value').then(snap => updateMap(snap.val()))
-        );
+        // Auto-filter on any change
+        vehicleSelect.addEventListener('change', applyFilters);
+        startDateInput.addEventListener('change', applyFilters);
+        endDateInput.addEventListener('change', applyFilters);
     </script>
 </body>
 </html>
-
