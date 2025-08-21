@@ -159,10 +159,10 @@
             }
 
             // Fit bounds if we have data
-            if (boundsArr.length > 0) {
-                const bounds = L.latLngBounds(boundsArr);
-                map.whenReady(() => map.fitBounds(bounds, { padding: [20, 20] }));
-            }
+           // if (boundsArr.length > 0) {
+           //     const bounds = L.latLngBounds(boundsArr);
+           //     map.whenReady(() => map.fitBounds(bounds, { padding: [20, 20] }));
+           // }
         };
 
         // 3. Data Listener
@@ -179,3 +179,4 @@
     </script>
 </body>
 </html>
+
