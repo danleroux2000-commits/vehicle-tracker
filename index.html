@@ -50,11 +50,12 @@
             height: 100%;
         }
 
+        /* Smaller dots */
         .circle-marker div {
-            width: 10px;
-            height: 10px;
+            width: 5px;
+            height: 5px;
             border-radius: 50%;
-            border: 2px solid white;
+            border: 1px solid white;
         }
     </style>
 </head>
@@ -148,42 +149,52 @@
 
                 if (!points.length) continue;
 
-                const latlngs = points.map(p => [p.lat, p.lon]);
                 const vehicleColor = getVehicleColor(vid);
+
+                let segment = [];
+                let lastTime = null;
 
                 points.forEach((p, idx) => {
                     const latlng = [p.lat, p.lon];
+                    const currentTime = new Date(p.timestamp);
 
-                    let formattedTime = p.timestamp;
-                    try {
-                        const d = new Date(p.timestamp);
-                        formattedTime = d.toLocaleString("en-GB", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit"
-                        });
-                    } catch (e) {}
+                    // Break line if gap > 1 hour
+                    if (lastTime && (currentTime - lastTime) > (60 * 60 * 1000)) {
+                        if (segment.length > 1) {
+                            const polyline = L.polyline(segment, { color: vehicleColor }).addTo(map);
+                            polylines[vid + "_" + idx] = polyline;
+                        }
+                        segment = [];
+                    }
 
-                    const markerIcon = (idx === points.length - 1)
-                        ? L.icon({
-                            iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-                            iconSize: [25, 41],
-                            iconAnchor: [12, 41],
-                            popupAnchor: [1, -34]
-                        })
-                        : L.divIcon({
-                            className: "circle-marker",
-                            html: `<div style="background:${vehicleColor}"></div>`
-                        });
+                    segment.push(latlng);
+                    lastTime = currentTime;
+
+                    // Marker
+// Marker
+const markerIcon = (idx === points.length - 1)
+    ? L.icon({
+        iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34]
+    })
+    : L.divIcon({
+        className: "circle-marker",
+        html: `<div style="background:${vehicleColor}"></div>`
+    });
+
+
 
                     const marker = L.marker(latlng, { icon: markerIcon }).addTo(map)
                         .bindPopup(`
                             <b>${vid}</b><br>
                             Status: ${p.status}<br>
                             Speed: ${p.speed ?? 'N/A'} km/h<br>
-                            Time: ${formattedTime}
+                            Time: ${currentTime.toLocaleString("en-GB", {
+                                day: "2-digit", month: "short", year: "numeric",
+                                hour: "2-digit", minute: "2-digit"
+                            })}
                         `)
                         .bindTooltip(`${vid}`, { permanent: false, direction: 'top' });
 
@@ -191,8 +202,11 @@
                     boundsArr.push(latlng);
                 });
 
-                const polyline = L.polyline(latlngs, { color: vehicleColor }).addTo(map);
-                polylines[vid] = polyline;
+                // Draw last segment
+                if (segment.length > 1) {
+                    const polyline = L.polyline(segment, { color: vehicleColor }).addTo(map);
+                    polylines[vid + "_final"] = polyline;
+                }
             }
 
             // Optional: Auto-fit map
